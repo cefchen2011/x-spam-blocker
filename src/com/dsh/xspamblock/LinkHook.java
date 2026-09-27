@@ -23,7 +23,13 @@ final class LinkHook {
     static final String HOST = "xspamblock.example.com";
     private static final String PATH = "/mute";
 
-    /** Hosts whose taps belong to us: the loopback service and the marker fallback. */
+    /**
+     * Hosts whose taps belong to us.
+     *
+     * The control normally opens the loopback service, which records the block itself;
+     * swallowing that intent here just makes the tap feel instant (no browser flash). The
+     * marker host is the fallback for when the service is not up yet.
+     */
     private static boolean isOurs(String host) {
         if (host == null) return false;
         return HOST.equalsIgnoreCase(host) || "127.0.0.1".equals(host) || "localhost".equalsIgnoreCase(host);

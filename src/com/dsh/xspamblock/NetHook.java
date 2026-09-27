@@ -202,6 +202,26 @@ public final class NetHook {
         }
     }
 
+    /** Writes a body to the app's external files dir; used while diagnosing rendering. */
+    static void dumpDebug(String name, String body) {
+        try {
+            if (sContext == null) return;
+            File dir = sContext.getExternalFilesDir(null);
+            if (dir == null) return;
+            if (!dir.exists()) dir.mkdirs();
+            File f = new File(dir, "xsb_" + name + ".json");
+            Writer w = new OutputStreamWriter(new FileOutputStream(f), "UTF-8");
+            try {
+                w.write(body);
+            } finally {
+                w.close();
+            }
+            XposedBridge.log(ModuleMain.TAG + ": dumped " + f.getAbsolutePath());
+        } catch (Throwable t) {
+            XposedBridge.log(ModuleMain.TAG + ": dump failed: " + t);
+        }
+    }
+
     static void countFlagged() {
         sFlagged.incrementAndGet();
     }

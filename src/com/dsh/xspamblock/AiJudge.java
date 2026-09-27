@@ -17,9 +17,12 @@ import java.io.Writer;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -31,8 +34,7 @@ import de.robv.android.xposed.XposedBridge;
  *
  * The local rule set is consulted first; only replies it does not already flag are sent
  * here. Verdicts are cached by text hash and persisted, so a text is classified once and
- * the answer is reused on every later render. Calls run on a small background pool and
- * never block the network thread that is producing the timeline.
+ * the answer is reused on every later render.
  */
 final class AiJudge {
 
@@ -109,7 +111,9 @@ final class AiJudge {
         // ConfigBridge. Endpoint and model already have sensible public defaults.
         configure(true, DEFAULT_API_KEY, ENDPOINT_DEFAULT, MODEL_DEFAULT);
         sCacheFile = new File(ctx.getFilesDir(), "xsb_ai_cache.json");
-        sPool = new ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS,
+        // Enough threads that a batch of candidates is judged in roughly one round trip
+        // instead of one round trip each.
+        sPool = new ThreadPoolExecutor(6, 6, 30, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<Runnable>(64),
                 new ThreadPoolExecutor.DiscardOldestPolicy());
         load();
@@ -137,6 +141,67 @@ final class AiJudge {
         return CACHE.get(key(text));
     }
 
+    /**
+     * Classifies a batch of texts before the current response is handed back to X, so a
+     * post the model flags as spam gets its button on this very render instead of waiting
+     * for X to happen to lay that row out again.
+     *
+     * Every call goes out in parallel and the wait is bounded. Whatever has not answered
+     * by the deadline stays queued and lands on a later render. Cached texts cost nothing,
+     * so in steady state this adds no latency at all.
+     */
+    static void warmBatch(List<String> texts, List<String> fallbackHandles, long waitMs) {
+        if (!enabled() || sPool == null || texts.isEmpty()) return;
+        long started = System.currentTimeMillis();
+        long deadline = started + waitMs;
+
+        List<Future<?>> futures = new ArrayList<Future<?>>();
+        for (int i = 0; i < texts.size(); i++) {
+            final String text = texts.get(i);
+            final String fallback = fallbackHandles.size() > i ? fallbackHandles.get(i) : null;
+            final String k = key(text);
+            if (CACHE.containsKey(k) || IN_FLIGHT.putIfAbsent(k, Boolean.TRUE) != null) continue;
+            try {
+                futures.add(sPool.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            Verdict v = classify(text, fallback);
+                            if (v != null) {
+                                CACHE.put(k, v);
+                                XposedBridge.log(ModuleMain.TAG + ": AI verdict "
+                                        + (v.spam ? "SPAM" : "clean")
+                                        + " handle@" + v.handle
+                                        + " conf=" + String.format("%.2f", v.confidence)
+                                        + " :: " + shorten(text));
+                            }
+                        } finally {
+                            IN_FLIGHT.remove(k);
+                        }
+                    }
+                }));
+            } catch (Throwable t) {
+                IN_FLIGHT.remove(k);
+            }
+        }
+        if (futures.isEmpty()) return;
+
+        int answered = 0;
+        for (Future<?> f : futures) {
+            long left = deadline - System.currentTimeMillis();
+            if (left <= 0) break;
+            try {
+                f.get(left, TimeUnit.MILLISECONDS);
+                answered++;
+            } catch (Throwable ignored) {
+                // Timed out or failed; the remaining calls keep running on the pool.
+            }
+        }
+        save();
+        XposedBridge.log(ModuleMain.TAG + ": AI batch " + answered + "/" + futures.size()
+                + " answered in " + (System.currentTimeMillis() - started) + "ms");
+    }
+
     /** Queues a classification when one is not already cached or running. */
     static void requestAsync(final String text, final String fallbackHandle) {
         if (!enabled() || sPool == null) return;
@@ -151,11 +216,6 @@ final class AiJudge {
                         if (v != null) {
                             CACHE.put(k, v);
                             save();
-                            XposedBridge.log(ModuleMain.TAG + ": AI verdict "
-                                    + (v.spam ? "SPAM" : "clean")
-                                    + " handle@" + v.handle
-                                    + " conf=" + String.format("%.2f", v.confidence)
-                                    + " :: " + shorten(text));
                         }
                     } finally {
                         IN_FLIGHT.remove(k);
@@ -165,20 +225,6 @@ final class AiJudge {
         } catch (Throwable t) {
             IN_FLIGHT.remove(k);
         }
-    }
-
-    /** Synchronous classification, used by the settings screen's test button. */
-    static Verdict classifyNow(String text, String fallbackHandle) {
-        if (!enabled()) return null;
-        String k = key(text);
-        Verdict v = CACHE.get(k);
-        if (v != null) return v;
-        v = classify(text, fallbackHandle);
-        if (v != null) {
-            CACHE.put(k, v);
-            save();
-        }
-        return v;
     }
 
     private static Verdict classify(String text, String fallbackHandle) {

@@ -183,7 +183,45 @@ after clear all: []
 XSBlock: blocked keywords cleared (2 removed)
 ```
 
-## 9. 踩过的坑
+## 9. 两个把按钮「吃掉」的坑（v1.1.1 修复）
+
+### 9.1 时间线不止一种结构
+
+转换器原先只认 `data.timeline_response.timeline.instructions`，那是首页的结构。
+搜索页走的是 `search_by_raw_query`，于是**搜索结果整页被跳过**，一屏按钮都没有。
+现在改为递归遍历整份响应里所有 `instructions` 数组，并递归查找 `tweet_results`：
+
+```
+SearchTimelineQuery timelines=1 tweets=16 flagged=3
+ConversationTimeline timelines=1 tweets=2  flagged=0
+```
+
+### 9.2 实体下标 X 是按码点算的
+
+注入后有时渲染成蓝色「屏蔽」，有时却把裸 URL 打印出来。对比落盘的 JSON 才看出规律：
+
+| 帖子 | `display_text_range` 终点 | 字符串长度(码点) | 结果 |
+| --- | --- | --- | --- |
+| `Codex的新版UI已经疯了` | 与长度一致 | 一致 | ✅ 渲染成「屏蔽」 |
+| `比我好看的没我骚😜…@xunyuan49` | 54 | 52 | ❌ 打印裸 URL |
+| `我果然太涩了🌊🤽…` | 90 | 84 | ❌ 打印裸 URL |
+
+差值正好等于帖子里的 emoji 个数 —— **X 用 Unicode 码点算下标，而 Java 字符串是 UTF-16**
+（一个 emoji 占两个单元）。带 emoji 的帖子下标整体偏移，X 认为实体越界就丢掉它。
+修法是写入前转换：
+
+```java
+int start = updated.codePointCount(0, visible.length() + 2);
+int end   = updated.codePointCount(0, updated.length());
+```
+
+### 9.3 顺带确认：expanded_url 必须是 https
+
+把 `expanded_url` 指向本地 Web 服务（`http://127.0.0.1:PORT/...`）时，X 同样会丢弃整个实体、
+打印裸 URL。所以控制项统一用 https 标记地址，点击由 LinkHook 吞掉 Intent 完成；
+本地服务保留为兜底通路（见第 5 节）。
+
+## 10. 踩过的坑
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
@@ -197,7 +235,7 @@ XSBlock: blocked keywords cleared (2 removed)
 | `deepseek-flash` 返回 content 为空 | 该模型是推理模型，`max_tokens` 太小会全被 reasoning 占满 | `max_tokens` 提到 800 |
 | 设置页启动即崩 | 布局里状态圆点是 `View`，代码却强转 `TextView` | 改为 `View` |
 
-## 10. 未能解决：X 服务端「已静音的字词」同步
+## 11. 未能解决：X 服务端「已静音的字词」同步
 
 尝试把关键词回放到 `POST https://api.x.com/1.1/mutes/keywords/create.json`，
 用 X 自己的 `OkHttpClient`（这样请求会经过 X 的拦截器链）：
