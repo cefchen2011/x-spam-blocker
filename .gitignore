@@ -1,0 +1,27 @@
+# build output
+build/
+apk/
+*.apk
+*.dex
+*.class
+
+# local analysis artefacts (large, regenerable)
+tools/*.pkl
+tools/jadx/
+tools/jadx.zip
+dumps/
+lspd/
+shots/
+ref/
+
+# publishing helpers (local only)
+tools/gh_*.ps1
+tools/_*.ps1
+tools/_*.py
+
+# editor / os noise
+.vscode/
+.idea/
+*.iml
+Thumbs.db
+.DS_Store

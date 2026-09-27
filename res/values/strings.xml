@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">X 垃圾帖屏蔽</string>
+    <string name="module_description">识别 "@某人,内容" 形式的性暗示垃圾回复，在帖子旁显示"屏蔽"按钮，一键加入屏蔽关键词。</string>
+</resources>
