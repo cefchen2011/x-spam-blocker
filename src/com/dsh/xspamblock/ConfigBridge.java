@@ -23,10 +23,15 @@ final class ConfigBridge {
     static final String ACTION_CONFIG = "com.dsh.xspamblock.CONFIG";
     static final String ACTION_REQUEST = "com.dsh.xspamblock.REQUEST";
     static final String ACTION_STATUS = "com.dsh.xspamblock.STATUS";
+    /** Sent by the app to remove one keyword, or all of them. */
+    static final String ACTION_EDIT = "com.dsh.xspamblock.EDIT_KEYWORD";
+    static final String EXTRA_OP = "op";
+    static final String EXTRA_KEYWORD = "keyword";
+    static final String OP_REMOVE = "remove";
+    static final String OP_CLEAR = "clear";
     static final String EXTRA_TEST_MODE = "test_mode";
     static final String EXTRA_KEYWORDS = "keywords";
     static final String EXTRA_AI_ENABLED = "ai_enabled";
-    static final String EXTRA_AI_STRICT = "ai_strict";
     static final String EXTRA_AI_KEY = "ai_key";
     static final String EXTRA_AI_ENDPOINT = "ai_endpoint";
     static final String EXTRA_AI_MODEL = "ai_model";
@@ -45,17 +50,28 @@ final class ConfigBridge {
             BroadcastReceiver receiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
-                    if (intent == null || !ACTION_CONFIG.equals(intent.getAction())) return;
+                    if (intent == null) return;
+
+                    if (ACTION_EDIT.equals(intent.getAction())) {
+                        String op = intent.getStringExtra(EXTRA_OP);
+                        if (OP_CLEAR.equals(op)) {
+                            MuteStore.clear();
+                        } else if (OP_REMOVE.equals(op)) {
+                            MuteStore.remove(intent.getStringExtra(EXTRA_KEYWORD));
+                        }
+                        // MuteStore publishes the new list, which also refreshes the app UI.
+                        return;
+                    }
+
+                    if (!ACTION_CONFIG.equals(intent.getAction())) return;
                     sTestMode = intent.getBooleanExtra(EXTRA_TEST_MODE, false);
                     AiJudge.configure(
                             intent.getBooleanExtra(EXTRA_AI_ENABLED, true),
-                            intent.getBooleanExtra(EXTRA_AI_STRICT, false),
                             intent.getStringExtra(EXTRA_AI_KEY),
                             intent.getStringExtra(EXTRA_AI_ENDPOINT),
                             intent.getStringExtra(EXTRA_AI_MODEL));
                     sAnswered = true;
                     XposedBridge.log(ModuleMain.TAG + ": AI config enabled=" + AiJudge.enabled()
-                            + " strict=" + AiJudge.strict()
                             + (AiJudge.enabled() ? "" : " (no API key configured)"));
                     XposedBridge.log(ModuleMain.TAG + ": config received (testMode=" + sTestMode + ")");
                     // Tell the app we are alive so its status card can say so.
@@ -72,6 +88,7 @@ final class ConfigBridge {
                 }
             };
             IntentFilter filter = new IntentFilter(ACTION_CONFIG);
+            filter.addAction(ACTION_EDIT);
             if (Build.VERSION.SDK_INT >= 33) {
                 ctx.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
             } else {

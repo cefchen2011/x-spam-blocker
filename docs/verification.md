@@ -164,7 +164,26 @@ $ cat /data/data/com.twitter.android/files/xsb_ai_cache.json
 > （用户实际遇到的垃圾回复多出现在评论区）。该路径复用同一份已验证的 `classify()` 与
 > 同一份缓存读取逻辑。
 
-## 8. 踩过的坑
+## 8. 两级判定与关键词管理
+
+判定逻辑已改为：带 `@` → 本地规则命中就显示；不命中再问 AI，AI 判为垃圾才显示。
+候选范围从 `@某人,` 放宽到任意带 `@` 的回复（提示词也相应放宽，不再要求以 @ 开头）。
+原来那个"严格模式"开关随之取消——新逻辑里 AI 分支本来就只在判为垃圾时才显示。
+
+关键词管理实测（设置页 → X 进程 → 回传）：
+
+```
+before: ["xiaomei520","nina_88","sweet_dm"]
+tap chip: @xiaomei520  ✕      -> 确认框 -> 删除
+after remove one: ["nina_88","sweet_dm"]
+XSBlock: blocked keyword removed -> @xiaomei520 (total 2)
+
+tap 清空全部                   -> 确认框 -> 清空
+after clear all: []
+XSBlock: blocked keywords cleared (2 removed)
+```
+
+## 9. 踩过的坑
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
@@ -178,7 +197,7 @@ $ cat /data/data/com.twitter.android/files/xsb_ai_cache.json
 | `deepseek-flash` 返回 content 为空 | 该模型是推理模型，`max_tokens` 太小会全被 reasoning 占满 | `max_tokens` 提到 800 |
 | 设置页启动即崩 | 布局里状态圆点是 `View`，代码却强转 `TextView` | 改为 `View` |
 
-## 9. 未能解决：X 服务端「已静音的字词」同步
+## 10. 未能解决：X 服务端「已静音的字词」同步
 
 尝试把关键词回放到 `POST https://api.x.com/1.1/mutes/keywords/create.json`，
 用 X 自己的 `OkHttpClient`（这样请求会经过 X 的拦截器链）：

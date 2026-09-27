@@ -76,10 +76,26 @@ final class MuteStore {
         return added;
     }
 
+    /** Removes one keyword. Returns true when it was actually there. */
+    static synchronized boolean remove(String rawKeyword) {
+        String k = normalize(rawKeyword);
+        if (k.isEmpty()) return false;
+        boolean removed = KEYWORDS.remove(k);
+        if (removed) {
+            save();
+            publish();
+            XposedBridge.log(ModuleMain.TAG + ": blocked keyword removed -> @" + k
+                    + " (total " + KEYWORDS.size() + ")");
+        }
+        return removed;
+    }
+
     static synchronized void clear() {
+        int before = KEYWORDS.size();
         KEYWORDS.clear();
         save();
         publish();
+        XposedBridge.log(ModuleMain.TAG + ": blocked keywords cleared (" + before + " removed)");
     }
 
     static synchronized int size() {

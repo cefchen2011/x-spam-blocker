@@ -20,7 +20,6 @@ public class KeywordReceiver extends BroadcastReceiver {
     public static final String KEY_LAST_SEEN = "last_seen";
     public static final String KEY_PID = "last_pid";
     public static final String KEY_AI_ENABLED = "ai_enabled";
-    public static final String KEY_AI_STRICT = "ai_strict";
     public static final String KEY_AI_KEY = "ai_key";
     public static final String KEY_AI_ENDPOINT = "ai_endpoint";
     public static final String KEY_AI_MODEL = "ai_model";
@@ -53,6 +52,16 @@ public class KeywordReceiver extends BroadcastReceiver {
         }
     }
 
+    /** Asks the hooked process to drop one keyword (op = OP_REMOVE) or all of them. */
+    public static void edit(Context context, String op, String keyword) {
+        Intent i = new Intent(ConfigBridge.ACTION_EDIT)
+                .setPackage("com.twitter.android")
+                .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+                .putExtra(ConfigBridge.EXTRA_OP, op)
+                .putExtra(ConfigBridge.EXTRA_KEYWORD, keyword);
+        context.sendBroadcast(i);
+    }
+
     /** Pushes the current settings back to the hooked process. */
     public static void publish(Context context, SharedPreferences p) {
         Intent reply = new Intent(ConfigBridge.ACTION_CONFIG)
@@ -61,7 +70,6 @@ public class KeywordReceiver extends BroadcastReceiver {
                 .putExtra(ConfigBridge.EXTRA_TEST_MODE, p.getBoolean(KEY_TEST_MODE, false))
                 .putExtra(ConfigBridge.EXTRA_KEYWORDS, p.getString(KEY_LIST, ""))
                 .putExtra(ConfigBridge.EXTRA_AI_ENABLED, p.getBoolean(KEY_AI_ENABLED, true))
-                .putExtra(ConfigBridge.EXTRA_AI_STRICT, p.getBoolean(KEY_AI_STRICT, false))
                 .putExtra(ConfigBridge.EXTRA_AI_KEY, p.getString(KEY_AI_KEY, ""))
                 .putExtra(ConfigBridge.EXTRA_AI_ENDPOINT,
                         p.getString(KEY_AI_ENDPOINT, AiJudge.ENDPOINT_DEFAULT))

@@ -25,3 +25,9 @@ tools/_*.py
 *.iml
 Thumbs.db
 .DS_Store
+
+# device test helpers
+tools/setkey.py
+tools/deltest.py
+tools/tap*.py
+

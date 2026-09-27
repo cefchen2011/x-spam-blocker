@@ -29,10 +29,10 @@ import de.robv.android.xposed.XposedBridge;
 /**
  * Asks deepseek-flash whether a reply is sexual-solicitation spam.
  *
- * The local regex is what makes the button appear instantly; the model is the referee.
- * Verdicts are cached by text hash and persisted, so a post is classified once and the
- * answer is reused on every later render. Calls run on a small background pool and never
- * block the network thread that is producing the timeline.
+ * The local rule set is consulted first; only replies it does not already flag are sent
+ * here. Verdicts are cached by text hash and persisted, so a text is classified once and
+ * the answer is reused on every later render. Calls run on a small background pool and
+ * never block the network thread that is producing the timeline.
  */
 final class AiJudge {
 
@@ -44,18 +44,13 @@ final class AiJudge {
      * switched off and the module runs on the local rule set alone.
      */
     static final String DEFAULT_API_KEY = "";
+
     private static final long CONNECT_TIMEOUT_MS = 6000L;
     private static final long READ_TIMEOUT_MS = 25000L;
-    private static final int MAX_CANDIDATES_PER_RESPONSE = 6;
 
     private static final String SYSTEM_PROMPT =
-            "\u4f60\u662f\u793e\u4ea4\u5e73\u53f0\u7684\u5185\u5bb9\u5b89\u5168\u5224\u5b9a\u5668\u3002"
-            + "\u5224\u65ad\u7ed9\u51fa\u7684\u63a8\u6587\u56de\u590d\u662f\u5426\u5c5e\u4e8e\u201c\u6027\u6697\u793a\u5783\u573e\u5f15\u6d41\u201d\uff1a"
-            + "\u7279\u5f81\u662f\u5f00\u5934 @\u67d0\u4eba \u52a0\u9017\u53f7\uff0c\u540e\u9762\u8ddf\u62db\u5ad6\u3001\u7ea6\u70ae\u3001\u5356\u8d44\u6e90\u3001\u966a\u804a\u7b49\u6027\u6697\u793a\u63fd\u5ba2\u5185\u5bb9\u3002"
-            + "\u666e\u901a\u4ea4\u6d41\u3001\u8c03\u4f83\u3001\u670b\u53cb\u95f4\u6253\u8da3\u4e00\u5f8b\u4e0d\u7b97\u3002"
-            + "\u53ea\u8f93\u51fa JSON\uff0c\u4e0d\u8981\u591a\u4f59\u6587\u5b57\uff0c\u683c\u5f0f\uff1a"
-            + "{\"spam\": true \u6216 false, \"handle\": \"\u88ab@\u7684\u7528\u6237\u540d\uff08\u4e0d\u542b@\uff09\uff0c\u6ca1\u6709\u5219\u7a7a\u5b57\u7b26\u4e32\", "
-            + "\"confidence\": 0.0 \u5230 1.0, \"reason\": \"\u7b80\u77ed\u4e2d\u6587\u7406\u7531\"}";
+            "\u4f60\u662f\u793e\u4ea4\u5e73\u53f0\u7684\u5185\u5bb9\u5b89\u5168\u5224\u5b9a\u5668\u3002\u5224\u65ad\u7ed9\u51fa\u7684\u63a8\u6587\u56de\u590d\u662f\u5426\u5c5e\u4e8e\u201c\u6027\u6697\u793a\u5783\u573e\u5f15\u6d41\u201d\uff1a\u5373\u62db\u5ad6\u3001\u7ea6\u70ae\u3001\u5356\u8d44\u6e90\u3001\u966a\u804a\u7b49\u6027\u6697\u793a\u63fd\u5ba2\u5185\u5bb9\u3002\u5e38\u89c1\u5f62\u5f0f\u662f\u5f00\u5934 @\u67d0\u4eba \u52a0\u9017\u53f7\uff0c\u4f46\u4e0d\u5c40\u9650\u4e8e\u6b64\uff1b\u53ea\u8981\u662f\u6027\u6697\u793a\u63fd\u5ba2\u7684\u56de\u590d\u90fd\u7b97\uff0c\u4e0d\u5fc5\u4ee5 @ \u5f00\u5934\u3002\u666e\u901a\u4ea4\u6d41\u3001\u8c03\u4f83\u3001\u670b\u53cb\u95f4\u6253\u8da3\u3001\u5bf9\u8272\u60c5\u5185\u5bb9\u7684\u6279\u8bc4\u6216\u8ba8\u8bba\u4e00\u5f8b\u4e0d\u7b97\u3002\u53ea\u8f93\u51fa JSON\uff0c\u4e0d\u8981\u591a\u4f59\u6587\u5b57\uff0c\u683c\u5f0f\uff1a"
+            + "{\"spam\": true \u6216 false, \"handle\": \"\u88ab@\u7684\u7528\u6237\u540d\uff08\u4e0d\u542b@\uff09\uff0c\u6ca1\u6709\u5219\u7a7a\u5b57\u7b26\u4e32\", \"confidence\": 0.0 \u5230 1.0, \"reason\": \"\u7b80\u77ed\u4e2d\u6587\u7406\u7531\"}";
 
     /** A verdict: spam or not, plus the handle the model identified. */
     static final class Verdict {
@@ -76,7 +71,6 @@ final class AiJudge {
     private static final AtomicInteger sErrors = new AtomicInteger();
 
     private static volatile boolean sEnabled;
-    private static volatile boolean sStrict;
     private static volatile String sApiKey = "";
     private static volatile String sEndpoint = ENDPOINT_DEFAULT;
     private static volatile String sModel = MODEL_DEFAULT;
@@ -86,9 +80,8 @@ final class AiJudge {
 
     private AiJudge() {}
 
-    static void configure(boolean enabled, boolean strict, String apiKey, String endpoint, String model) {
+    static void configure(boolean enabled, String apiKey, String endpoint, String model) {
         sEnabled = enabled;
-        sStrict = strict;
         sApiKey = apiKey == null ? "" : apiKey.trim();
         sEndpoint = (endpoint == null || endpoint.trim().isEmpty()) ? ENDPOINT_DEFAULT : endpoint.trim();
         while (sEndpoint.endsWith("/")) sEndpoint = sEndpoint.substring(0, sEndpoint.length() - 1);
@@ -97,10 +90,6 @@ final class AiJudge {
 
     static boolean enabled() {
         return sEnabled && !sApiKey.isEmpty();
-    }
-
-    static boolean strict() {
-        return sStrict;
     }
 
     static int callCount() {
@@ -118,7 +107,7 @@ final class AiJudge {
     static void init(Context ctx) {
         // Starts switched off; the settings screen pushes the key, endpoint and model over
         // ConfigBridge. Endpoint and model already have sensible public defaults.
-        configure(true, false, DEFAULT_API_KEY, ENDPOINT_DEFAULT, MODEL_DEFAULT);
+        configure(true, DEFAULT_API_KEY, ENDPOINT_DEFAULT, MODEL_DEFAULT);
         sCacheFile = new File(ctx.getFilesDir(), "xsb_ai_cache.json");
         sPool = new ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<Runnable>(64),
@@ -133,7 +122,7 @@ final class AiJudge {
      * which has its own copy of these statics, so it cannot disturb the hooked process.
      */
     static String probe(String endpoint, String key, String model, String text) {
-        configure(true, false, key, endpoint, model);
+        configure(true, key, endpoint, model);
         Verdict v = classify(text, "probe");
         if (v == null) {
             return "\u8c03\u7528\u5931\u8d25\uff08\u8bf7\u68c0\u67e5 Key / \u7f51\u7edc / \u63a5\u53e3\u5730\u5740\uff09";
@@ -162,10 +151,11 @@ final class AiJudge {
                         if (v != null) {
                             CACHE.put(k, v);
                             save();
-                            if (v.spam) {
-                                XposedBridge.log(ModuleMain.TAG + ": AI verdict spam @" + v.handle
-                                        + " (" + String.format("%.2f", v.confidence) + ") :: " + shorten(text));
-                            }
+                            XposedBridge.log(ModuleMain.TAG + ": AI verdict "
+                                    + (v.spam ? "SPAM" : "clean")
+                                    + " handle@" + v.handle
+                                    + " conf=" + String.format("%.2f", v.confidence)
+                                    + " :: " + shorten(text));
                         }
                     } finally {
                         IN_FLIGHT.remove(k);
@@ -177,7 +167,7 @@ final class AiJudge {
         }
     }
 
-    /** Synchronous classification with a short budget, for strict mode. */
+    /** Synchronous classification, used by the settings screen's test button. */
     static Verdict classifyNow(String text, String fallbackHandle) {
         if (!enabled()) return null;
         String k = key(text);
@@ -222,8 +212,8 @@ final class AiJudge {
             String handle = verdict.optString("handle", "");
             double confidence = verdict.optDouble("confidence", 0.0);
             if (handle == null || handle.trim().isEmpty()) handle = fallbackHandle;
-            handle = handle.replace("@", "").trim();
-            if (spam && (handle == null || handle.isEmpty())) return null;
+            handle = handle == null ? "" : handle.replace("@", "").trim();
+            if (spam && handle.isEmpty()) return null;
             return new Verdict(spam, handle, confidence);
         } catch (Throwable t) {
             sErrors.incrementAndGet();

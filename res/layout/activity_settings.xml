@@ -132,6 +132,22 @@
                 android:textColor="@color/md_on_surface_variant"
                 android:textSize="13sp"
                 android:lineSpacingExtra="3dp" />
+
+            <TextView
+                android:id="@+id/clearAll"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_button_tonal"
+                android:paddingStart="18dp"
+                android:paddingEnd="18dp"
+                android:paddingTop="9dp"
+                android:paddingBottom="9dp"
+                android:text="清空全部"
+                android:textColor="@color/md_error"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium" />
         </LinearLayout>
 
         <!-- 测试模式 -->
@@ -209,7 +225,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="3dp"
-                        android:text="先用规则筛出“@某人,”形状的回复，再交给 deepseek-flash 判定。判定结果会缓存，同一条只问一次。"
+                        android:text="带有 @ 的回复：先过本地规则，规则命中就直接显示屏蔽；规则不中再交给 deepseek-flash，判为垃圾才显示。结论按正文缓存，同一条只问一次。"
                         android:textColor="@color/md_on_surface_variant"
                         android:textSize="13sp"
                         android:lineSpacingExtra="3dp" />
@@ -220,27 +236,6 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="14dp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="严格模式：只信 AI 的结论"
-                    android:textColor="@color/md_on_surface"
-                    android:textSize="14sp" />
-
-                <Switch
-                    android:id="@+id/aiStrictSwitch"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
             </LinearLayout>
 
             <EditText

@@ -23,6 +23,11 @@ import de.robv.android.xposed.XposedBridge;
  */
 final class Transformer {
 
+    /** Upper bound on model calls queued from a single timeline response. */
+    private static final int MAX_AI_PER_RESPONSE = 8;
+    private static final java.util.concurrent.atomic.AtomicInteger sAiQueued =
+            new java.util.concurrent.atomic.AtomicInteger();
+
     private Transformer() {}
 
     static String transform(String url, String operation, String body) {
@@ -40,6 +45,7 @@ final class Transformer {
             int flagged = 0;
             int dropped = 0;
             int testLeft = ConfigBridge.testMode() ? 3 : 0;
+            sAiQueued.set(0);
 
             for (int i = 0; i < instructions.length(); i++) {
                 JSONObject instruction = instructions.optJSONObject(i);
@@ -93,27 +99,40 @@ final class Transformer {
     /**
      * Decides whether this reply deserves a 屏蔽 control, and for which handle.
      *
-     * With the model switched off this is the local regex plus keyword list. With it on,
-     * the regex only picks candidates and the model has the final say. A given text is
-     * sent to the model at most once because verdicts are cached by text hash.
+     *   if (contains "@") {
+     *       if (matches the local rules)      -> show 屏蔽
+     *       else if (the model says spam)     -> show 屏蔽
+     *   }
+     *
+     * The model branch is answered from a cache keyed by the text hash; a text is sent for
+     * classification at most once, off the network thread, so the timeline never blocks.
+     * The verdict therefore lands on the first render that happens after the answer comes
+     * back - normally the next time the post is laid out.
      */
     private static String decide(String text) {
-        String candidate = SpamDetector.candidateHandle(text);
-        if (candidate == null) return null;
-        if (!AiJudge.enabled()) return SpamDetector.detect(text);
+        if (text == null || text.indexOf('@') < 0) return null;
+
+        String byRule = SpamDetector.detect(text);
+        if (byRule != null) return byRule;
+
+        if (!AiJudge.enabled()) return null;
 
         AiJudge.Verdict cached = AiJudge.cached(text);
         if (cached != null) {
             if (!cached.spam) return null;
-            return (cached.handle == null || cached.handle.isEmpty()) ? candidate : cached.handle;
+            return handleOf(cached, text);
         }
 
-        // Unknown text: queue a classification. The local detector still decides this
-        // render, unless strict mode is on - then the button waits for the cached verdict
-        // and shows up on the next render of the same post.
-        AiJudge.requestAsync(text, candidate);
-        if (AiJudge.strict()) return null;
-        return SpamDetector.detect(text);
+        if (sAiQueued.incrementAndGet() <= MAX_AI_PER_RESPONSE) {
+            AiJudge.requestAsync(text, SpamDetector.anyHandle(text));
+        }
+        return null;
+    }
+
+    private static String handleOf(AiJudge.Verdict verdict, String text) {
+        if (verdict.handle != null && !verdict.handle.isEmpty()) return verdict.handle;
+        String any = SpamDetector.anyHandle(text);
+        return (any == null || any.isEmpty()) ? null : any;
     }
 
     /**

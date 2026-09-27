@@ -1,6 +1,7 @@
 package com.dsh.xspamblock;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -9,6 +10,8 @@ import android.content.SharedPreferences;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.widget.CompoundButton;
 import android.widget.EditText;
@@ -34,9 +37,9 @@ public class SettingsActivity extends Activity {
     private TextView mKeywordCount;
     private TextView mChipEmpty;
     private LinearLayout mChipFlow;
+    private TextView mClearAll;
     private Switch mTestSwitch;
     private Switch mAiSwitch;
-    private Switch mAiStrictSwitch;
     private EditText mAiKeyField;
     private EditText mAiModelField;
     private EditText mAiEndpointField;
@@ -55,9 +58,9 @@ public class SettingsActivity extends Activity {
         mKeywordCount = findViewById(R.id.keywordCount);
         mChipEmpty = findViewById(R.id.chipEmpty);
         mChipFlow = findViewById(R.id.chipFlow);
+        mClearAll = findViewById(R.id.clearAll);
         mTestSwitch = findViewById(R.id.testSwitch);
         mAiSwitch = findViewById(R.id.aiSwitch);
-        mAiStrictSwitch = findViewById(R.id.aiStrictSwitch);
         mAiKeyField = findViewById(R.id.aiKeyField);
         mAiModelField = findViewById(R.id.aiModelField);
         mAiEndpointField = findViewById(R.id.aiEndpointField);
@@ -81,18 +84,16 @@ public class SettingsActivity extends Activity {
                 KeywordReceiver.publish(getApplicationContext(), sp);
             }
         });
-        mAiStrictSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton v, boolean checked) {
-                SharedPreferences sp = getSharedPreferences(KeywordReceiver.PREFS, Context.MODE_PRIVATE);
-                sp.edit().putBoolean(KeywordReceiver.KEY_AI_STRICT, checked).commit();
-                KeywordReceiver.publish(getApplicationContext(), sp);
-            }
-        });
         findViewById(R.id.aiSave).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 saveAndTest();
+            }
+        });
+        mClearAll.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                confirmClearAll();
             }
         });
 
@@ -103,6 +104,7 @@ public class SettingsActivity extends Activity {
             }
         };
         IntentFilter filter = new IntentFilter(ConfigBridge.ACTION_STATUS);
+        filter.addAction(MuteStore.ACTION);
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(mStatusReceiver, filter, Context.RECEIVER_EXPORTED);
         } else {
@@ -114,7 +116,6 @@ public class SettingsActivity extends Activity {
 
     private void loadAiFields(SharedPreferences p) {
         mAiSwitch.setChecked(p.getBoolean(KeywordReceiver.KEY_AI_ENABLED, true));
-        mAiStrictSwitch.setChecked(p.getBoolean(KeywordReceiver.KEY_AI_STRICT, false));
         mAiKeyField.setText(p.getString(KeywordReceiver.KEY_AI_KEY, ""));
         mAiModelField.setText(p.getString(KeywordReceiver.KEY_AI_MODEL, AiJudge.MODEL_DEFAULT));
         mAiEndpointField.setText(p.getString(KeywordReceiver.KEY_AI_ENDPOINT, AiJudge.ENDPOINT_DEFAULT));
@@ -188,11 +189,11 @@ public class SettingsActivity extends Activity {
 
         mTestSwitch.setChecked(p.getBoolean(KeywordReceiver.KEY_TEST_MODE, false));
         mAiSwitch.setChecked(p.getBoolean(KeywordReceiver.KEY_AI_ENABLED, true));
-        mAiStrictSwitch.setChecked(p.getBoolean(KeywordReceiver.KEY_AI_STRICT, false));
 
         String list = p.getString(KeywordReceiver.KEY_LIST, "");
         String[] words = (list == null || list.isEmpty()) ? new String[0] : list.split("\n");
         mKeywordCount.setText(words.length + " \u4e2a");
+        mClearAll.setVisibility(words.length == 0 ? View.GONE : View.VISIBLE);
         renderChips(words);
     }
 
@@ -234,17 +235,74 @@ public class SettingsActivity extends Activity {
     private TextView buildChip(String word) {
         if (word.isEmpty()) return null;
         float d = getResources().getDisplayMetrics().density;
+        final String bare = word.startsWith("@") ? word.substring(1) : word;
         TextView chip = new TextView(this);
-        chip.setText(word);
+        chip.setText(word + "  \u2715");
         chip.setTextSize(13f);
         chip.setTextColor(getColor(R.color.md_on_secondary_container));
         chip.setBackgroundResource(R.drawable.bg_chip);
         chip.setPadding((int) (12 * d), (int) (6 * d), (int) (12 * d), (int) (6 * d));
+        chip.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                confirmRemove(bare);
+            }
+        });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.rightMargin = (int) (8 * d);
         chip.setLayoutParams(lp);
         return chip;
+    }
+
+    /** Asks X's process to drop one keyword, then refreshes shortly after it reports back. */
+    private void confirmRemove(final String word) {
+        new AlertDialog.Builder(this)
+                .setTitle("\u5220\u9664\u5c4f\u853d\u5173\u952e\u8bcd")
+                .setMessage("\u4e0d\u518d\u5c4f\u853d @" + word + " \uff1f\u8be5\u8d26\u53f7\u7684\u5e16\u5b50\u4f1a\u91cd\u65b0\u51fa\u73b0\u3002")
+                .setNegativeButton("\u53d6\u6d88", null)
+                .setPositiveButton("\u5220\u9664", new android.content.DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(android.content.DialogInterface dialog, int which) {
+                        KeywordReceiver.edit(getApplicationContext(), ConfigBridge.OP_REMOVE, word);
+                        scheduleRefresh();
+                    }
+                })
+                .show();
+    }
+
+    private void confirmClearAll() {
+        SharedPreferences p = getSharedPreferences(KeywordReceiver.PREFS, Context.MODE_PRIVATE);
+        int count = p.getInt(KeywordReceiver.KEY_COUNT, 0);
+        new AlertDialog.Builder(this)
+                .setTitle("\u6e05\u7a7a\u5168\u90e8\u5173\u952e\u8bcd")
+                .setMessage("\u5c06\u5220\u9664\u5168\u90e8 " + count + " \u4e2a\u5173\u952e\u8bcd\uff0c\u786e\u5b9a\uff1f")
+                .setNegativeButton("\u53d6\u6d88", null)
+                .setPositiveButton("\u6e05\u7a7a", new android.content.DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(android.content.DialogInterface dialog, int which) {
+                        KeywordReceiver.edit(getApplicationContext(), ConfigBridge.OP_CLEAR, null);
+                        scheduleRefresh();
+                    }
+                })
+                .show();
+    }
+
+    /** The hooked process answers asynchronously, so look again a moment later. */
+    private void scheduleRefresh() {
+        Handler h = new Handler(Looper.getMainLooper());
+        h.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                refresh();
+            }
+        }, 500);
+        h.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                refresh();
+            }
+        }, 1500);
     }
 
     private void tint(View view, int color) {

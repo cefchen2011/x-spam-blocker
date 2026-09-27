@@ -13,6 +13,10 @@ final class SpamDetector {
     private static final Pattern HANDLE_COMMA =
             Pattern.compile("@([A-Za-z0-9_]{2,15})\\s*[,，、]");
 
+    /** Any "@someone". */
+    private static final Pattern ANY_HANDLE =
+            Pattern.compile("@([A-Za-z0-9_]{2,15})");
+
     /** Sexual / paid-service come-ons that mark the reply as spam. */
     private static final String[] INNUENDO = {
             // Chinese
@@ -30,13 +34,10 @@ final class SpamDetector {
 
     private SpamDetector() {}
 
-    /**
-     * Loose shape check: any "@handle," in the text. Used to pick the replies worth
-     * sending to the model, which then decides for real.
-     */
-    static String candidateHandle(String text) {
-        if (text == null || text.length() < 4) return null;
-        Matcher m = HANDLE_COMMA.matcher(text);
+    /** Any "@handle" in the text, used as a fallback handle for the model's verdict. */
+    static String anyHandle(String text) {
+        if (text == null) return null;
+        Matcher m = ANY_HANDLE.matcher(text);
         return m.find() ? m.group(1) : null;
     }
 
